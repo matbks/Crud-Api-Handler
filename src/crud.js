@@ -91,11 +91,11 @@ class CrudApiHandler {
     const { username, password } = req.body;
 
     // Query to fetch the user by username
-    const query = `SELECT * FROM bot_users WHERE name = ?`;
+    const query = `SELECT * FROM users WHERE username = ?`;
 
     this.connection.query(query, [username], (error, results) => {
       if (error)
-        return this.handleError(res, error, "Erro na busca do usuário");
+        return this.handleError(res, error, "Erro na busca do usuário:", username);
 
       // Verify if a user was found and compare the provided password with the stored hashed password
       if (
