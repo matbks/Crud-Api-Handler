@@ -97,7 +97,7 @@ class CrudApiHandler {
 
   authenticate(req, res) {
     const { username, password } = req.body;
-    const query = `SELECT * FROM users WHERE name = ?`;
+    const query = `SELECT * FROM users WHERE username = ?`;
 
     this.connection.query(query, [username], (error, results) => {
       if (error)
