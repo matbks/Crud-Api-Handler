@@ -4,8 +4,18 @@ const mysql = require("mysql");
 const { body, validationResult } = require("express-validator");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-// const expressJwt = require('express-jwt');
 const { expressjwt: expressJwt } = require("express-jwt");
+
+console.log("Configurações de conexão com o banco de dados:");
+console.log("Host:", process.env.DB_HOST);
+console.log("Usuário:", process.env.DB_USER);
+console.log("Senha:", process.env.DB_PASSWORD);
+console.log("Database:", process.env.DB_DATABASE);
+
+function generateHashedPassword(password) {
+  const saltRounds = 10;
+  return bcrypt.hashSync(password, saltRounds);
+}
 
 class CrudApiHandler {
   constructor() {
@@ -15,6 +25,7 @@ class CrudApiHandler {
       user: process.env.DB_USER,
       password: process.env.DB_PASSWORD,
       database: process.env.DB_DATABASE,
+      port: process.env.PORT
     });
 
     this.app = express();
@@ -22,15 +33,16 @@ class CrudApiHandler {
     const rateLimit = require("express-rate-limit");
 
     const limiter = rateLimit({
-      windowMs: 15 * 60 * 1000, // 15 minutes
-      max: 100, // limit each IP to 100 requests per windowMs
+      
+      max: process.env.ENV = 'development' ? 200 : 100, // Número de chamadas
+      windowMs: 15 * 60 * 1000, // 15 min
+
     });
 
-    //  apply to all requests    
     this.app.use(limiter);
     this.app.use(express.json());
     this.app.use(this.handleSyntaxError);
-     
+
     this.jwtMiddleware = expressJwt({
       secret: process.env.JWT_SECRET,
       algorithms: ["HS256"],
@@ -42,9 +54,7 @@ class CrudApiHandler {
   handleSyntaxError(err, req, res, next) {
     if (err instanceof SyntaxError && err.status === 400 && "body" in err) {
       console.error("Bad JSON");
-      return res
-        .status(400)
-        .send({ status: 400, message: "Corpo da requisição inválido." });
+      return res.status(400).send({ status: 400, message: "Corpo da requisição inválido." });
     }
     next();
   }
@@ -55,10 +65,8 @@ class CrudApiHandler {
     });
   }
 
-  setupEndpoints() { 
-    this.app.post("/api/crud/authenticate", this.authenticate.bind(this)); 
-    
-    // Protect the following routes with the JWT middleware
+  setupEndpoints() {
+    this.app.post("/api/crud/authenticate", this.authenticate.bind(this));
     this.app.use(this.jwtMiddleware);
 
     this.app.post(
@@ -89,13 +97,11 @@ class CrudApiHandler {
 
   authenticate(req, res) {
     const { username, password } = req.body;
-
-    // Query to fetch the user by username
-    const query = `SELECT * FROM users WHERE username = ?`;
+    const query = `SELECT * FROM users WHERE name = ?`;
 
     this.connection.query(query, [username], (error, results) => {
       if (error)
-        return this.handleError(res, error, "Erro na busca do usuário:", username);
+        return this.handleError(res, error, "Erro na busca do usuário");
 
       // Verify if a user was found and compare the provided password with the stored hashed password
       if (
@@ -109,6 +115,9 @@ class CrudApiHandler {
       } else {
         res.status(401).send("Autenticação falhou");
       }
+
+      // Move o console.log dos resultados aqui
+      console.log("Resultados da consulta de autenticação:", results);
     });
   }
 
@@ -118,45 +127,66 @@ class CrudApiHandler {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    let { tableName, fields } = req.body;
+    const { tableName, fields } = req.body;
 
-    // Check if the password field is present
-    if (!fields.password) {
-      return res.status(400).json({ error: "Password field is required" });
+    if (tableName === 'users' && fields && fields.password) {
+      fields.password = bcrypt.hashSync(fields.password, 10);
     }
 
-    const hashedPassword = bcrypt.hashSync(fields.password, 10); // Hash the password
-    fields.password = hashedPassword; // Replace the plaintext password with the hashed password
+    const query = `INSERT INTO ?? SET ?`;
+    const values = [tableName, fields];
 
-    tableName = tableName.replace(/[^a-zA-Z0-9_]/g, "");
-    const query = `INSERT INTO ${tableName} SET ?`;
-
-    this.connection.query(query, fields, (error, results) => {
+    this.connection.query(query, values, (error, results) => {
       if (error) return this.handleError(res, error, "Erro na inserção");
       res.status(201).json({ message: "Registro criado com sucesso" });
     });
   }
 
+  // readRecords(req, res) {
+  //   const errors = validationResult(req);
+  //   if (!errors.isEmpty()) {
+  //     return res.status(400).json({ errors: errors.array() });
+  //   }
+
+  //   let tableName = req.query.tableName; // Altere const para let
+
+  //   console.log("tableName:", tableName);
+
+  //   let query = `SELECT * FROM ??`;
+  //   const values = [tableName];
+
+  //   this.connection.query(query, values, (error, results) => {
+  //     if (error) return this.handleError(res, error, "Erro na busca dos registros");
+  //     res.json(results);
+  //   });
+  // }
   readRecords(req, res) {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    let { tableName, fields } = req.body;
-    tableName = tableName.replace(/[^a-zA-Z0-9_]/g, "");
-    let query = `SELECT * FROM ${tableName}`;
+    let tableName = req.query.tableName;
+    let fields = req.query.fields || {};
 
-    if (fields && Object.keys(fields).length > 0) {
-      const conditions = Object.keys(fields)
-        .map((key) => `${key} = ${mysql.escape(fields[key])}`)
-        .join(" AND ");
-      query += ` WHERE ${conditions}`;
+    console.log("tableName:", tableName);
+    console.log("fields:", fields);
+
+    let query = `SELECT * FROM ??`;
+    let values = [tableName];
+
+    // Verifica se há campos para filtrar e constrói a cláusula WHERE
+    if (Object.keys(fields).length > 0) {
+      let whereClause = [];
+      Object.keys(fields).forEach(field => {
+        whereClause.push(mysql.escapeId(field) + ' = ' + mysql.escape(fields[field]));
+      });
+      query += ' WHERE ' + whereClause.join(' AND ');
     }
 
-    this.connection.query(query, (error, results) => {
-      if (error) return this.handleError(res, error, "Error fetching records");
-      res.status(200).json(results);
+    this.connection.query(query, values, (error, results) => {
+      if (error) return this.handleError(res, error, "Erro na busca dos registros");
+      res.json(results);
     });
   }
 
@@ -166,35 +196,81 @@ class CrudApiHandler {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    let { tableName, fields } = req.body;
-    tableName = tableName.replace(/[^a-zA-Z0-9_]/g, "");
-    const key = Object.keys(fields)[0];
-    const value = fields[key];
-    const query = `UPDATE ${tableName} SET ? WHERE ${key} = ?`;
+    const { tableName, fields } = req.body;
 
-    this.connection.query(query, [fields, value], (error, results) => {
-      if (error) return this.handleError(res, error, "Error updating record");
-      res.status(200).json({ message: "Record updated successfully" });
+    // Replacing tableName with a safe variable
+    const safeTableName = tableName.replace(/[^a-zA-Z0-9_]/g, "");
+
+    // SQL Query - UPSERT operation (INSERT ... ON DUPLICATE KEY UPDATE)
+    const query = `INSERT INTO ${safeTableName} SET ? ON DUPLICATE KEY UPDATE ?`;
+
+    // Execute query with provided fields
+    this.connection.query(query, [fields, fields], (error, results) => {
+      if (error) return this.handleError(res, error, "Error handling record");
+
+      // Determine if a new record was inserted or an existing one was updated
+      if (results.insertId) {
+        return res.status(201).json({ message: "New record created successfully", insertId: results.insertId });
+      } else if (results.affectedRows) {
+        return res.status(200).json({ message: "Record updated successfully" });
+      } else {
+        return res.status(404).json({ message: "No record found to update, and no new record was created" });
+      }
     });
   }
+
+
+
+  // deleteRecord(req, res) {
+
+  //   const errors = validationResult(req);
+
+  //   if (!errors.isEmpty()) {
+  //     return res.status(400).json({ errors: errors.array() });
+  //   }
+
+  //   let { tableName, fields } = req.body;
+  //   tableName = tableName.replace(/[^a-zA-Z0-9_]/g, "");
+  //   const key = Object.keys(fields)[0];
+  //   const value = fields[key];
+  //   const query = `DELETE FROM ${tableName} WHERE ${key} = ?`;
+
+  //   this.connection.query(query, [value], (error, results) => {
+  //     if (error) return this.handleError(res, error, "Error deleting record");
+  //     res.status(200).json({ message: "Record deleted successfully" });
+  //   });
+  // }
 
   deleteRecord(req, res) {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({ errors: errors.array() });
     }
-
+  
     let { tableName, fields } = req.body;
     tableName = tableName.replace(/[^a-zA-Z0-9_]/g, "");
-    const key = Object.keys(fields)[0];
-    const value = fields[key];
-    const query = `DELETE FROM ${tableName} WHERE ${key} = ?`;
-
-    this.connection.query(query, [value], (error, results) => {
+  
+    // Construa a cláusula WHERE dinamicamente
+    const whereClauses = Object.entries(fields).map(([key, value]) => {
+      return `${mysql.escapeId(key)} = ${mysql.escape(value)}`;
+    });
+  
+    if (whereClauses.length === 0) {
+      return res.status(400).json({ error: 'No fields provided for deletion' });
+    }
+  
+    const query = `DELETE FROM ${tableName} WHERE ` + whereClauses.join(' AND ');
+  
+    this.connection.query(query, (error, results) => {
       if (error) return this.handleError(res, error, "Error deleting record");
-      res.status(200).json({ message: "Record deleted successfully" });
+      if (results.affectedRows > 0) {
+        res.status(200).json({ message: "Record deleted successfully" });
+      } else {
+        res.status(404).json({ message: "Record not found" });
+      }
     });
   }
+  
 
   handleError(res, error, message) {
     console.error(message, error.sqlMessage || error.message);
